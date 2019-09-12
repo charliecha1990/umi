@@ -1,3 +1,4 @@
+import webpack from 'webpack';
 import Config from 'webpack-chain';
 import { join, resolve, relative } from 'path';
 import { existsSync } from 'fs';
@@ -5,6 +6,7 @@ import { EOL } from 'os';
 import assert from 'assert';
 import { getPkgPath, shouldTransform } from './es5ImcompatibleVersions';
 import resolveDefine from './resolveDefine';
+import send, { STARTING } from '../send';
 
 function makeArray(item) {
   if (Array.isArray(item)) return item;
@@ -289,6 +291,18 @@ export default function(opts) {
       }
     }
   }
+
+  // plugins -> progress report
+  webpackConfig
+    .plugin('progressReport')
+    .use(webpack.ProgressPlugin, [(percentage) => {
+      process.send({
+        type: STARTING,
+        progress: {
+          percentage,
+        },
+      });
+    }]);
 
   // plugins -> ignore moment locale
   if (opts.ignoreMomentLocale) {

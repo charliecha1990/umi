@@ -104,6 +104,8 @@ export default function dev({
             urls: {
               local: urls.localUrlForTerminal,
               lan: urls.lanUrlForTerminal,
+              rawLocal: urls.localUrlForBrowser,
+              rawLanUrl: urls.rawLanUrl,
             },
           });
         }

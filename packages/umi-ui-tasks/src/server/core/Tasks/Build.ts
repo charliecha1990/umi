@@ -1,6 +1,6 @@
 import { BaseTask, ITaskOptions } from './Base';
-import { TaskType } from '../enums';
-import { isScriptKeyExist, runCommand } from '../../util';
+import { TaskType, TaskState } from '../enums';
+import { parseScripts, runCommand } from '../../util';
 
 export class BuildTask extends BaseTask {
   constructor(opts: ITaskOptions) {
@@ -10,25 +10,53 @@ export class BuildTask extends BaseTask {
 
   public async run(env: any = {}) {
     await super.run();
-    this.proc = runCommand(this.getScript(), {
+    const { script, envs: scriptEnvs } = this.getScript();
+    this.proc = runCommand(script, {
       cwd: this.cwd,
-      env, // 前端传入的 env
+      env: {
+        ...env,
+        ...scriptEnvs,
+      }, // 前端传入的 env
     });
 
     this.handleChildProcess(this.proc);
+    // 进度条更新
+    this.proc.on('message', msg => {
+      if (this.state !== TaskState.ING) {
+        return;
+      }
+      const { type } = msg;
+      if (type === 'STARTING') {
+        this.updateProgress(msg);
+      }
+    });
   }
 
-  private getScript() {
-    let command = '';
+  public getDetail() {
+    return {
+      ...super.getDetail(),
+      progress: this.progress,
+    };
+  }
 
-    if (isScriptKeyExist(this.pkgPath, 'build')) {
-      command = 'npm run build';
-    } else if (this.isBigfishProject) {
-      command = 'bigfish build'; // TODO: 优先使用 node_modules 中的命令？
-    } else {
-      command = 'umi build'; // TODO: 优先使用 node_modules 中的命令？
+  private getScript(): { script: string; envs: object } {
+    const { succes, exist, errMsg, envs, bin } = parseScripts({
+      pkgPath: this.pkgPath,
+      key: 'build',
+    });
+
+    if (!exist) {
+      return {
+        script: this.isBigfishProject ? 'bigfish build' : 'umi build',
+        envs: [],
+      };
     }
-
-    return command;
+    if (!succes) {
+      this.error(errMsg);
+    }
+    return {
+      script: `${bin} build`,
+      envs,
+    };
   }
 }

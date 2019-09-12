@@ -21,6 +21,7 @@ export class BaseTask extends EventEmitter {
   public proc: ChildProcess; // 当前进程
   private subscribeInitFlag: boolean = false;
   private isCancel: boolean = false;
+  protected progress: number = 0; // 进度，只有 dev 和 build 需要
 
   protected pkgPath: string = '';
   protected isBigfishProject: boolean = false;
@@ -138,5 +139,24 @@ export class BaseTask extends EventEmitter {
     process.on('exit', () => {
       proc.kill();
     });
+  }
+
+  protected updateProgress(msg) {
+    if (!msg.progress) {
+      return;
+    }
+    const { percentage } = msg.progress;
+    const current = Number(Number(percentage).toFixed(2));
+    if (current <= this.progress) {
+      return;
+    }
+    this.progress = current;
+    this.emit(TaskEventType.STATE_EVENT, this.state);
+  }
+
+  protected error(msg: string) {
+    const err = new Error(msg);
+    err.name = 'BaseTaskError';
+    throw err;
   }
 }

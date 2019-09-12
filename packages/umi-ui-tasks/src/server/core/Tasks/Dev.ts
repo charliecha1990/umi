@@ -1,12 +1,14 @@
 import { ChildProcess } from 'child_process';
-import stripAnsi from 'strip-ansi';
 import { BaseTask, ITaskOptions } from './Base';
 import { TaskState, TaskEventType, TaskType } from '../enums';
-import { isScriptKeyExist, runCommand } from '../../util';
+import { runCommand, parseScripts } from '../../util';
 
 export class DevTask extends BaseTask {
+  // 是否已经启动
   private started: boolean = false;
+  // local url
   private localUrl: string = '';
+  // lan url
   private lanUrl: string = '';
 
   constructor(opts: ITaskOptions) {
@@ -16,9 +18,13 @@ export class DevTask extends BaseTask {
 
   public async run(env: any = {}) {
     await super.run();
-    this.proc = runCommand(this.getScript(), {
+    const { script, envs: scriptEnv } = this.getScript();
+    this.proc = runCommand(script, {
       cwd: this.cwd,
-      env, // 前端传入的 env
+      env: {
+        ...env,
+        scriptEnv,
+      }, // 前端传入的 env
     });
     this.handleChildProcess(this.proc);
   }
@@ -45,14 +51,18 @@ export class DevTask extends BaseTask {
       started: this.started,
       localUrl: this.localUrl,
       lanUrl: this.lanUrl,
+      progress: this.progress,
     };
   }
 
   protected handleChildProcess(proc: ChildProcess) {
+    proc.on('message', msg => {
+      this.updateState(msg);
+    });
+
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', log => {
       this.emit(TaskEventType.STD_OUT_DATA, log);
-      this.guessStart(log);
     });
 
     proc.stderr.setEncoding('utf8');
@@ -71,41 +81,61 @@ export class DevTask extends BaseTask {
     });
   }
 
-  private getScript(): string {
-    let command = '';
-    if (isScriptKeyExist(this.pkgPath, 'start')) {
-      command = 'npm start';
-    } else if (isScriptKeyExist(this.pkgPath, 'dev')) {
-      command = 'npm run dev';
-    } else if (this.isBigfishProject) {
-      command = 'bigfish dev';
-    } else {
-      command = 'umi dev';
+  private getScript(): { script: string; envs: object } {
+    let res = parseScripts({
+      pkgPath: this.pkgPath,
+      key: 'start',
+    });
+    if (!res.exist) {
+      res = parseScripts({
+        pkgPath: this.pkgPath,
+        key: 'dev',
+      });
     }
-    return command;
+
+    const { succes, exist, errMsg, envs, bin } = res;
+
+    // No specified dev or start script
+    if (!exist) {
+      return {
+        script: this.isBigfishProject ? 'bigfish dev' : 'umi dev',
+        envs: [],
+      };
+    }
+    // Parse script error
+    if (!succes) {
+      this.error(errMsg);
+    }
+
+    return {
+      script: `${bin} dev`,
+      envs,
+    };
   }
 
-  private guessStart(msg: string) {
+  private updateState(msg) {
     if (this.started) {
       return;
     }
-    if (!/running/.test(msg)) {
-      return;
+
+    const { type } = msg;
+    switch (type) {
+      case 'DONE':
+        this.success(msg);
+        break;
+      case 'STARTING':
+        this.updateProgress(msg);
+        break;
+      default:
     }
-    this.started = true;
-    const [, localStr, lanStr] = stripAnsi(msg).split('\n');
-    this.localUrl = this.parseUrl(localStr);
-    this.lanUrl = this.parseUrl(lanStr);
-    this.state = TaskState.SUCCESS;
-    this.emit(TaskEventType.STATE_EVENT, this.state);
   }
 
-  private parseUrl(str: string) {
-    if (!str) {
-      return '';
-    }
-    const hIndex = str.indexOf('h');
-    const slashIndex = str.lastIndexOf('/');
-    return str.substr(hIndex, slashIndex - hIndex);
+  private success(msg) {
+    const { urls } = msg;
+    this.started = true;
+    this.localUrl = urls.rawLocal;
+    this.lanUrl = urls.rawLanUrl;
+    this.state = TaskState.SUCCESS;
+    this.emit(TaskEventType.STATE_EVENT, this.state);
   }
 }
